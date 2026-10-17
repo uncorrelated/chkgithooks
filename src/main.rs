@@ -1,3 +1,5 @@
+// Written by zombie, uncorrelated
+// MIT License
 use regex::Regex;
 use std::env;
 use std::fs::File;
@@ -11,9 +13,9 @@ const MAX_COUNT_FILES: i32 = 100;
 const MAX_COUNT_HOOKS: i32 = 100;
 
 fn main() {
-    let re_section_name = Regex::new(r"^[ \t]*\[[^\]]*\]").unwrap();
+    let re_section_name = Regex::new(r"^([ \t]*\[[^\]]*\])+").unwrap();
     let re_hooks_path = Regex::new(r"(?i)^[ \t]*hooksPath[ \t]*=").unwrap();
-    let re_hook = Regex::new(r"(?i)^[ \t]*hook\..*\.enabled[ \t]*=").unwrap();
+    let re_hook = Regex::new(r#"(?i)^[^#;]*\[[ \t]*["']?hook([^a-z0-9\_\-][^\]]*)?\]"#).unwrap();
     let re_path = Regex::new(r"(?i)^[ \t]*path[ \t]*=[ \t]*([^#]+)[ \t]*").unwrap();
     let mut nhooks: i32 = 0;
     let mut _nfiles: i32 = 0;
@@ -98,17 +100,16 @@ fn chkconfig(
     is_local: bool,
     mut nfiles: i32,
 ) -> (i32, i32) {
-
     let mut nhooks: i32 = 0;
 
     nfiles += 1;
     if MAX_COUNT_FILES <= nfiles {
         if is_local {
             // ローカル設定のときは1以上で動作条件外
-            return (1, nfiles)
+            return (1, nfiles);
         } else {
             // グローバル設定のときは0で動作条件外
-            return (0, nfiles)
+            return (0, nfiles);
         }
     }
 
@@ -118,34 +119,36 @@ fn chkconfig(
         let reader = BufReader::new(handle);
         for line in reader.lines() {
             let line = line.expect("Couldn't read the file.");
-            let line = re_section_name.replace(&line, "");
-            if re_hooks_path.is_match(&line) {
-                if is_local {
-                    eprintln!("hooksPath: \"{}\" {}", filename, line);
-                }
-                nhooks += 1;
-            } else if re_hook.is_match(&line) && is_local {
+            if re_hook.is_match(&line) && is_local {
                 if is_local {
                     eprintln!("hook: \"{}\" {}", filename, line);
                 }
                 nhooks = nhooks + 1;
-            } else if let Some(caps) = re_path.captures(&line) {
-                let raw_path = caps.get(1).unwrap().as_str().trim().trim_matches('"');
-                let next_path = parent_dir.join(raw_path);
-                if is_local {
-                    eprintln!("path: \"{}\"  \"{}\"", filename, next_path.display());
+            } else {
+                let line = re_section_name.replace(&line, "");
+                if re_hooks_path.is_match(&line) {
+                    if is_local {
+                        eprintln!("hooksPath: \"{}\" {}", filename, line);
+                    }
+                    nhooks += 1;
+                } else if let Some(caps) = re_path.captures(&line) {
+                    let raw_path = caps.get(1).unwrap().as_str().trim().trim_matches('"');
+                    let next_path = parent_dir.join(raw_path);
+                    if is_local {
+                        eprintln!("path: \"{}\"  \"{}\"", filename, next_path.display());
+                    }
+                    let (n, m) = chkconfig(
+                        &next_path,
+                        &re_section_name,
+                        &re_hooks_path,
+                        &re_hook,
+                        &re_path,
+                        is_local,
+                        nfiles,
+                    );
+                    nhooks += n;
+                    nfiles = m;
                 }
-                let (n, m) = chkconfig(
-                    &next_path,
-                    &re_section_name,
-                    &re_hooks_path,
-                    &re_hook,
-                    &re_path,
-                    is_local,
-                    nfiles,
-                );
-                nhooks += n;
-                nfiles = m;
             }
             if is_local {
                 if MAX_COUNT_FILES <= nfiles || MAX_COUNT_HOOKS <= nhooks {
@@ -161,3 +164,4 @@ fn chkconfig(
 
     (nhooks, nfiles)
 }
+
