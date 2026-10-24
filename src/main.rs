@@ -95,7 +95,7 @@ fn chkconfig(file: &Path, is_local: bool, mut nfiles: i32) -> (i32, i32) {
         let reader = BufReader::new(handle);
         let mut lines = reader.lines().peekable();
         let mut table = String::from("");
-        while let Some(line) = lines.next() {
+        'reading_loop: while let Some(line) = lines.next() {
             let mut line = line.expect("Couldn't read the file.");
 
             // Line continuationの処理
@@ -119,12 +119,33 @@ fn chkconfig(file: &Path, is_local: bool, mut nfiles: i32) -> (i32, i32) {
                 eprintln!("hook: \"{}\" {}", filename, line);
                 nhooks = nhooks + 1;
             } else {
-                if "core" == table && "hookspath" == record.key {
+                if "core" == table {
                     if is_local {
-                        eprintln!("hooksPath: \"{}\" {}", filename, line);
+                        if "fsmonitor" == record.key && "true" != record.value {
+                            eprintln!("fsmonitor: \"{}\" {}", filename, line);
+                            nhooks += 1;
+                            continue;
+                        }
+                        let key = [
+                            "hookspath",
+                            "pager",
+                            "editor",
+                            "sshcommand",
+                            "gitproxy",
+                            "askpass",
+                        ];
+                        for k in key.iter() {
+                            if chkkey(&record.key, k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "hookspath" == record.key {
+                        nhooks += 1;
+                        continue;
                     }
-                    nhooks += 1;
-                } else if "path" == record.key {
+                } else if chkkey(&record.key, "path") {
                     let next_path = parent_dir.join(record.value);
                     if is_local {
                         eprintln!("path: \"{}\"  \"{}\"", filename, next_path.display());
@@ -132,6 +153,109 @@ fn chkconfig(file: &Path, is_local: bool, mut nfiles: i32) -> (i32, i32) {
                     let (n, m) = chkconfig(&next_path, is_local, nfiles);
                     nhooks += n;
                     nfiles = m;
+                } else if is_local {
+                    if "diff" == table {
+                        if chkkey(&record.key, "external") {
+                            eprintln!("{}: \"{}\" {}", record.key, filename, line);
+                            nhooks += 1;
+                            continue;
+                        }
+                        let key_suffix = ["command", "textconv"];
+                        for k in key_suffix.iter() {
+                            if chkkey(&record.key, k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "filter" == table {
+                        let key_suffix = ["clean", "smudge"];
+                        for k in key_suffix.iter() {
+                            if chkkey(&record.key, k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "merge" == table {
+                        if chkkey(&record.key, "driver") {
+                            eprintln!("{}: \"{}\" {}", record.key, filename, line);
+                            nhooks += 1;
+                            continue 'reading_loop;
+                        }
+                    } else if "difftool" == table {
+                        let key_suffix = ["cmd", "path"];
+                        for k in key_suffix.iter() {
+                            if chkkey(&record.key, k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "mergetool" == table {
+                        let key_suffix = ["cmd", "path"];
+                        for k in key_suffix.iter() {
+                            if chkkey(&record.key, k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "credential" == table {
+                        if chkkey(&record.key, "helper") {
+                            eprintln!("{}: \"{}\" {}", record.key, filename, line);
+                            nhooks += 1;
+                            continue 'reading_loop;
+                        }
+                    } else if "remote" == table {
+                        let key_suffix = ["uploadpack", "receivepack", "proxyauthmethod"];
+                        for k in key_suffix.iter() {
+                            if chkkey(&record.key, k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "gpg" == table {
+                        let key_suffix = ["program", "program", "defaultkeycommand"];
+                        for k in key_suffix.iter() {
+                            if chkkey(&record.key, k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "alias" == table {
+                        if record.value.contains('!') {
+                            eprintln!("{}: \"{}\" {}", record.key, filename, line);
+                            nhooks += 1;
+                            continue 'reading_loop;
+                        }
+                    } else if "sendmail" == table {
+                        let key = ["sendmailcmd", "smtpserver", "validate"];
+                        for k in key.iter() {
+                            if chkkey(&record.key, k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "man" == table {
+                        let key_suffix = ["cmd", "path"];
+                        for k in key_suffix.iter() {
+                            if chkkey(&record.key, k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "sequence" == table {
+                        if chkkey(&record.key, "editor") {
+                            eprintln!("{}: \"{}\" {}", record.key, filename, line);
+                            nhooks += 1;
+                            continue 'reading_loop;
+                        }
+                    }
                 }
             }
             if is_local {
@@ -147,4 +271,84 @@ fn chkconfig(file: &Path, is_local: bool, mut nfiles: i32) -> (i32, i32) {
     }
 
     (nhooks, nfiles)
+}
+
+fn chkkey(key: &str, condition: &str) -> bool {
+    let key_a = key.as_bytes();
+    let key_l = key_a.len();
+    let cnd_a = condition.as_bytes();
+    let cnd_l = cnd_a.len();
+
+    if 0 == key_l {
+        if 0 == cnd_l {
+            return true;
+        }
+        return false;
+    }
+
+    if key_l < cnd_l {
+        return false;
+    }
+
+    let mut n = key_l;
+    let mut m = cnd_l;
+
+    loop {
+        n -= 1;
+        m -= 1;
+        if key_a[n] != cnd_a[m] {
+            return false;
+        }
+        if 0 == m {
+            break;
+        }
+    }
+
+    // .${condition} の場合をチェック
+    if key_l > cnd_l && 0x2e != key_a[n - 1] {
+        return false;
+    }
+
+    return true;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_chkkey_same() {
+        let a = "abc";
+        let b = "abc";
+        assert!(true == chkkey(a, b), "'{}' <> '{}'\n", a, b);
+    }
+    #[test]
+    fn test_chkkey_different() {
+        let a = "abc";
+        let b = "adc";
+        assert!(false == chkkey(a, b), "'{}' <> '{}'\n", a, b);
+    }
+    #[test]
+    fn test_chkkey_suffix() {
+        let a = "efg.abc";
+        let b = "abc";
+        assert!(true == chkkey(a, b), "'{}' <> '{}'\n", a, b);
+    }
+    #[test]
+    fn test_chkkey_suffix_different() {
+        let a = "efg.abc";
+        let b = "adc";
+        assert!(false == chkkey(a, b), "'{}' <> '{}'\n", a, b);
+    }
+    #[test]
+    fn test_chkkey_zero_length() {
+        let a = "";
+        let b = "";
+        assert!(true == chkkey(a, b), "'{}' <> '{}'\n", a, b);
+    }
+    #[test]
+    fn test_chkkey_zero_length_different() {
+        let a = "";
+        let b = "abc";
+        assert!(false == chkkey(a, b), "'{}' <> '{}'\n", a, b);
+    }
 }

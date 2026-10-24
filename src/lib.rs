@@ -33,9 +33,11 @@ impl Record {
 
         let mut mode: Position = Position::Key;
         let mut trim_ws: bool = true;
+        let mut in_quote: bool = false;
+        let mut in_escape: bool = false;
 
         for c in chars.iter() {
-            if '#' == *c || ';' == *c {
+            if (!in_quote && !in_escape) && ('#' == *c || ';' == *c) {
                 break;
             }
             match mode {
@@ -49,20 +51,42 @@ impl Record {
                         }
                     } else {
                         if c.is_whitespace() || '.' == *c {
+                            in_quote = false;
+                            in_escape = false;
                             mode = Position::Name;
                             continue;
                         } else if '"' == *c {
+                            in_quote = true;
+                            in_escape = false;
                             mode = Position::Name;
-                            stack_name.push(*c);
                             continue;
                         }
                         stack_table.push(c.to_ascii_lowercase());
                     }
                 }
                 Position::Name => {
-                    if ']' == *c {
-                        mode = Position::Key;
+                    if in_escape {
+                        stack_name.push(*c);
+                        in_escape = false;
                         continue;
+                    }
+                    if '\\' == *c {
+                        in_escape = true;
+                        continue;
+                    }
+                    if in_quote {
+                        if '"' == *c {
+                            in_quote = false;
+                            continue;
+                        }
+                    } else {
+                        if ']' == *c {
+                            mode = Position::Key;
+                            continue;
+                        } else if '"' == *c {
+                            in_quote = true;
+                            continue;
+                        }
                     }
                     stack_name.push(*c);
                 }
@@ -84,8 +108,28 @@ impl Record {
                     if trim_ws && c.is_whitespace() {
                         continue;
                     }
-                    stack_value.push(*c);
                     trim_ws = false;
+                    if in_escape {
+                        stack_value.push(*c);
+                        in_escape = false;
+                        continue;
+                    }
+                    if '\\' == *c {
+                        in_escape = true;
+                        continue;
+                    }
+                    if in_quote {
+                        if '"' == *c {
+                            in_quote = false;
+                            continue;
+                        }
+                    } else {
+                        if '"' == *c {
+                            in_quote = true;
+                            continue;
+                        }
+                    }
+                    stack_value.push(*c);
                 }
             };
         }
@@ -103,9 +147,6 @@ impl Record {
             stack_value = Vec::new();
         }
 
-        stack_name = remove_quotes(stack_name);
-        stack_value = remove_quotes(stack_value);
-
         Record {
             table: String::from_iter(stack_table),
             name: String::from_iter(stack_name),
@@ -113,20 +154,6 @@ impl Record {
             value: String::from_iter(stack_value),
         }
     }
-}
-
-fn remove_quotes(v: Vec<char>) -> Vec<char> {
-    let len = v.len();
-    if 0 < len {
-        if '"' == v[0] && '"' == v[len - 1] {
-            if 3 <= len {
-                return v[1..len - 1].to_vec();
-            } else if 2 == len {
-                return Vec::new();
-            }
-        }
-    }
-    return v;
 }
 
 #[cfg(test)]
@@ -203,5 +230,17 @@ mod tests {
             "/tmp/malware.sh [user2]",
             &record,
         );
+    }
+    #[test]
+    fn test_semicolon() {
+        let string = String::from(r#"[core ";"] sshCommand = /tmp/malware.sh"#);
+        let record = Record::from(&string);
+        check("core", ";", "sshcommand", "/tmp/malware.sh", &record);
+    }
+    #[test]
+    fn test_sharp_in_quote() {
+        let string = String::from(r#"[alias]     st = "!# \n /tmp/malware.sh""#);
+        let record = Record::from(&string);
+        check("alias", "", "st", r#"!# n /tmp/malware.sh"#, &record);
     }
 }
