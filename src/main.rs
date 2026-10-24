@@ -95,7 +95,7 @@ fn chkconfig(file: &Path, is_local: bool, mut nfiles: i32) -> (i32, i32) {
         let reader = BufReader::new(handle);
         let mut lines = reader.lines().peekable();
         let mut table = String::from("");
-        while let Some(line) = lines.next() {
+        'reading_loop: while let Some(line) = lines.next() {
             let mut line = line.expect("Couldn't read the file.");
 
             // Line continuationの処理
@@ -119,11 +119,32 @@ fn chkconfig(file: &Path, is_local: bool, mut nfiles: i32) -> (i32, i32) {
                 eprintln!("hook: \"{}\" {}", filename, line);
                 nhooks = nhooks + 1;
             } else {
-                if "core" == table && "hookspath" == record.key {
+                if "core" == table {
                     if is_local {
-                        eprintln!("hooksPath: \"{}\" {}", filename, line);
+                        if "fsmonitor" == record.key && "true" != record.value {
+                            eprintln!("fsmonitor: \"{}\" {}", filename, line);
+                            nhooks += 1;
+                            continue;
+                        }
+                        let key = [
+                            "hookspath",
+                            "pager",
+                            "editor",
+                            "sshcommand",
+                            "gitproxy",
+                            "askpass",
+                        ];
+                        for k in key.iter() {
+                            if *k == record.key {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "hookspath" == record.key {
+                        nhooks += 1;
+                        continue;
                     }
-                    nhooks += 1;
                 } else if "path" == record.key {
                     let next_path = parent_dir.join(record.value);
                     if is_local {
@@ -132,6 +153,109 @@ fn chkconfig(file: &Path, is_local: bool, mut nfiles: i32) -> (i32, i32) {
                     let (n, m) = chkconfig(&next_path, is_local, nfiles);
                     nhooks += n;
                     nfiles = m;
+                } else if is_local {
+                    if "diff" == table {
+                        if "external" == record.key {
+                            eprintln!("{}: \"{}\" {}", record.key, filename, line);
+                            nhooks += 1;
+                            continue;
+                        }
+                        let key_suffix = [".command", ".textconv"];
+                        for k in key_suffix.iter() {
+                            if record.key.ends_with(k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "filter" == table {
+                        let key_suffix = [".clean", ".smudge"];
+                        for k in key_suffix.iter() {
+                            if record.key.ends_with(k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "merge" == table {
+                        if record.key.ends_with(".driver") {
+                                eprintln!("{}: \"{}\" {}", record.key, filename, line);
+                           nhooks += 1;
+                            continue 'reading_loop;
+                        }
+                    } else if "difftool" == table {
+                        let key_suffix = [".cmd", ".path"];
+                        for k in key_suffix.iter() {
+                            if record.key.ends_with(k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "mergetool" == table {
+                        let key_suffix = [".cmd", ".path"];
+                        for k in key_suffix.iter() {
+                            if record.key.ends_with(k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "credential" == table {
+                        if "helper" == record.key && record.value.starts_with('!') {
+                            eprintln!("{}: \"{}\" {}", record.key, filename, line);
+                            nhooks += 1;
+                            continue 'reading_loop;
+                        }
+                    } else if "remote" == table {
+                        let key_suffix = [".uploadpack", ".receivepack", "proxyauthmethod"];
+                        for k in key_suffix.iter() {
+                            if record.key.ends_with(k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "gpg" == table {
+                        let key_suffix = ["program", ".program", "ssh.defaultkeycommand"];
+                        for k in key_suffix.iter() {
+                            if record.key.ends_with(k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "alias" == table {
+                        if record.value.starts_with('!') {
+                            eprintln!("{}: \"{}\" {}", record.key, filename, line);
+                            nhooks += 1;
+                            continue 'reading_loop;
+                        }
+                    } else if "sendmail" == table {
+                        let key = ["sendmailcmd", "smtpserver", "validate"];
+                        for k in key.iter() {
+                            if *k == record.key {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "man" == table {
+                        let key_suffix = ["cmd", "path"];
+                        for k in key_suffix.iter() {
+                            if record.key.ends_with(k) {
+                                eprintln!("{}: \"{}\" {}", k, filename, line);
+                                nhooks += 1;
+                                continue 'reading_loop;
+                            }
+                        }
+                    } else if "sequence" == table {
+                        if "editor" == record.key {
+                            eprintln!("{}: \"{}\" {}", record.key, filename, line);
+                            nhooks += 1;
+                            continue 'reading_loop;
+                        }
+                    }
                 }
             }
             if is_local {
